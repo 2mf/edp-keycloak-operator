@@ -24,6 +24,7 @@ import (
 	"github.com/epam/edp-keycloak-operator/internal/controller/helper"
 	"github.com/epam/edp-keycloak-operator/pkg/client/keycloakapi"
 	"github.com/epam/edp-keycloak-operator/pkg/maputil"
+	"github.com/epam/edp-keycloak-operator/pkg/objectmeta"
 	"github.com/epam/edp-keycloak-operator/pkg/secretref"
 )
 
@@ -109,17 +110,37 @@ func (h *PutClient) putKeycloakClient(ctx context.Context, keycloakClient *keycl
 		}
 	}
 
-	clientSecret, secretVersion, err := h.getClientSecret(ctx, keycloakClient)
-	if err != nil {
-		return "", fmt.Errorf("error getting client secret: %w", err)
+	checkExistingFirst := keycloakClient.Spec.Secret == "" && objectmeta.PreserveClientSecret(keycloakClient)
+	var existingClient *keycloakapi.ClientRepresentation
+
+	if checkExistingFirst {
+		existingClient, _, err = h.kClient.Clients.GetClientByClientID(ctx, realmName, keycloakClient.Spec.ClientId)
+		if err != nil && !keycloakapi.IsNotFound(err) {
+			return "", fmt.Errorf("unable to check client id: %w", err)
+		}
+	}
+
+	preserveExistingSecret := existingClient != nil &&
+		keycloakClient.Spec.Secret == "" &&
+		existingClient.Id != nil &&
+		objectmeta.PreserveClientSecret(keycloakClient)
+
+	var clientSecret, secretVersion string
+	if !preserveExistingSecret {
+		clientSecret, secretVersion, err = h.getClientSecret(ctx, keycloakClient)
+		if err != nil {
+			return "", fmt.Errorf("error getting client secret: %w", err)
+		}
 	}
 
 	clientRep := convertSpecToClientRepresentation(&keycloakClient.Spec, clientSecret, authFlowOverrides)
 	newHash := clientSecretsHash(secretVersion)
 
-	existingClient, _, err := h.kClient.Clients.GetClientByClientID(ctx, realmName, keycloakClient.Spec.ClientId)
-	if err != nil && !keycloakapi.IsNotFound(err) {
-		return "", fmt.Errorf("unable to check client id: %w", err)
+	if !checkExistingFirst {
+		existingClient, _, err = h.kClient.Clients.GetClientByClientID(ctx, realmName, keycloakClient.Spec.ClientId)
+		if err != nil && !keycloakapi.IsNotFound(err) {
+			return "", fmt.Errorf("unable to check client id: %w", err)
+		}
 	}
 
 	if existingClient != nil && existingClient.Id != nil {
