@@ -1539,7 +1539,7 @@ func serveExisting(
 		Build()
 
 	refMock := mocks.NewMockRefClient(t)
-	if !cr.Spec.Public && !(cr.Spec.Secret == "" && objectmeta.PreserveClientSecret(cr)) {
+	if !cr.Spec.Public && (cr.Spec.Secret != "" || !objectmeta.PreserveClientSecret(cr)) {
 		refMock.On("GetSecretFromRef", testifymock.Anything, testifymock.Anything, testClientNamespace).
 			Return("val", testSecretVersion, nil)
 	}
@@ -1784,6 +1784,7 @@ func TestPutClient_Serve_PreservesExistingSecretDuringUpdate(t *testing.T) {
 		Once()
 
 	var sent keycloakapi.ClientRepresentation
+
 	clientsMock.On("UpdateClient", testifymock.Anything, "realm", "123", testifymock.Anything).
 		Run(func(args testifymock.Arguments) {
 			sent = args.Get(3).(keycloakapi.ClientRepresentation)

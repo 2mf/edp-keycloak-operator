@@ -111,6 +111,7 @@ func (h *PutClient) putKeycloakClient(ctx context.Context, keycloakClient *keycl
 	}
 
 	checkExistingFirst := keycloakClient.Spec.Secret == "" && objectmeta.PreserveClientSecret(keycloakClient)
+
 	var existingClient *keycloakapi.ClientRepresentation
 
 	if checkExistingFirst {
