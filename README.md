@@ -147,6 +147,10 @@ To keep the secret of an existing Keycloak client unchanged when `spec.secret` i
 `edp.epam.com/preserve-client-secret: "true"` annotation to the `KeycloakClient`. New clients still
 receive a generated secret, and an explicitly configured `spec.secret` continues to be applied.
 
+The Keycloak secret is never changed, but the operator copies it into the Kubernetes Secret
+`keycloak-client-<name>-secret` (key `clientSecret`) and sets `spec.secret` to a reference to it.
+The Kubernetes Secret is created or updated on each reconciliation if its value differs.
+
 ```yaml
 apiVersion: v1.edp.epam.com/v1
 kind: KeycloakClient
