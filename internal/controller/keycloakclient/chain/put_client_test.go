@@ -18,7 +18,6 @@ import (
 	testifymock "github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
-	k8sErrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -1539,7 +1538,7 @@ func serveExisting(
 		Build()
 
 	refMock := mocks.NewMockRefClient(t)
-	if !cr.Spec.Public && !(cr.Spec.Secret == "" && objectmeta.PreserveClientSecret(cr)) {
+	if !cr.Spec.Public && (cr.Spec.Secret != "" || !objectmeta.PreserveClientSecret(cr)) {
 		refMock.On("GetSecretFromRef", testifymock.Anything, testifymock.Anything, testClientNamespace).
 			Return("val", testSecretVersion, nil)
 	}
@@ -1553,6 +1552,14 @@ func serveExisting(
 		clientsMock.On("UpdateClient", testifymock.Anything, "realm", "123", testifymock.Anything).
 			Return((*keycloakapi.Response)(nil), updateErr).
 			Once()
+	}
+
+	if cr.Spec.Secret == "" && objectmeta.PreserveClientSecret(cr) && !cr.Spec.Public {
+		cr.ResourceVersion = "999" // matches the fake client's stored version so spec updates succeed
+
+		clientsMock.On("GetClientSecret", testifymock.Anything, "realm", "123").
+			Return(&keycloakapi.CredentialRepresentation{Value: ptr.To("existing-secret")}, (*keycloakapi.Response)(nil), nil).
+			Maybe()
 	}
 
 	kc := &keycloakapi.KeycloakClient{Clients: clientsMock}
@@ -1763,6 +1770,7 @@ func TestPutClient_Serve_PreservesExistingSecretDuringUpdate(t *testing.T) {
 		objectmeta.PreserveClientSecretAnnotation: "true",
 	}
 	cr.Status.ConfigSecretsHash = "old"
+	cr.ResourceVersion = "999" // matches the fake client's stored version so spec updates succeed
 
 	existing := existingFor(t, cr)
 	existing.Secret = ptr.To("existing-secret")
@@ -1791,22 +1799,28 @@ func TestPutClient_Serve_PreservesExistingSecretDuringUpdate(t *testing.T) {
 		Return((*keycloakapi.Response)(nil), nil).
 		Once()
 
+	clientsMock.On("GetClientSecret", testifymock.Anything, "realm", "123").
+		Return(&keycloakapi.CredentialRepresentation{Value: ptr.To("existing-secret")}, (*keycloakapi.Response)(nil), nil).
+		Once()
+
 	err := NewPutClient(
 		&keycloakapi.KeycloakClient{Clients: clientsMock},
 		k8sClient,
 		mocks.NewMockRefClient(t),
 	).Serve(ctrl.LoggerInto(context.Background(), logr.Discard()), cr, "realm", &ClientContext{})
 	require.NoError(t, err)
-	require.Nil(t, sent.Secret)
-	require.Empty(t, cr.Spec.Secret)
+	require.Nil(t, sent.Secret, "Keycloak secret must not be overwritten")
 
-	var generatedSecret corev1.Secret
-	err = k8sClient.Get(context.Background(), client.ObjectKey{
+	secretName := "keycloak-client-" + testClientName + "-secret"
+	require.Equal(t, secretref.GenerateSecretRef(secretName, keycloakApi.ClientSecretKey), cr.Spec.Secret)
+
+	var mirrored corev1.Secret
+
+	require.NoError(t, k8sClient.Get(context.Background(), client.ObjectKey{
 		Namespace: testClientNamespace,
-		Name:      "keycloak-client-" + testClientName + "-secret",
-	}, &generatedSecret)
-	require.Error(t, err)
-	require.True(t, k8sErrors.IsNotFound(err))
+		Name:      secretName,
+	}, &mirrored))
+	require.Equal(t, "existing-secret", string(mirrored.Data[keycloakApi.ClientSecretKey]))
 }
 
 func TestPutClient_Serve_UpdatesWhenNeeded(t *testing.T) {
