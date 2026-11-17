@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: 'Git ref to build the snapshot from (branch, tag or SHA). Defaults to the latest tag.'
+        description: 'Git ref to build the snapshot from (branch, tag or SHA). Defaults to the branch the workflow runs on.'
         required: false
         default: ''
 
@@ -17,7 +17,7 @@ jobs:
     name: Build and push snapshot image
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       packages: write
     steps:
       - name: Checkout code
@@ -36,12 +36,11 @@ jobs:
         run: |
           set -xue
 
-          # Latest reachable tag, e.g. v1.36.0 -> 1.36.0
-          SOURCE_TAG="$(git describe --tags --abbrev=0)"
-          VERSION="${SOURCE_TAG#v}"
+          # Chart version without the -SNAPSHOT suffix, e.g. 1.37.0-SNAPSHOT -> 1.37.0
+          VERSION="$(sed -n 's/^version: *//p' deploy-templates/Chart.yaml | head -n1)"
+          VERSION="${VERSION%-SNAPSHOT}"
           SNAPSHOT_TAG="SNAPSHOT-${VERSION}-${GITHUB_RUN_NUMBER}"
 
-          echo "SOURCE_TAG=${SOURCE_TAG}" >> "$GITHUB_ENV"
           echo "SNAPSHOT_TAG=${SNAPSHOT_TAG}" >> "$GITHUB_ENV"
 
       - name: Build operator binaries
@@ -72,6 +71,12 @@ jobs:
           push: true
           tags: |
             ${{ env.IMAGE_NAME }}:${{ env.SNAPSHOT_TAG }}
+
+      - name: Create snapshot git tag
+        run: |
+          set -xue
+          git tag "${SNAPSHOT_TAG}"
+          git push origin "refs/tags/${SNAPSHOT_TAG}"
 
       - name: Print image reference
         run: |
