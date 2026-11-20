@@ -50,11 +50,11 @@ commands:
         exit 1
       fi
 
-      pod=$(kubectl get pods -n keycloak -l app=keycloak -o jsonpath='{.items[0].metadata.name}')
+      pod=$(kubectl get pods -n "$NAMESPACE" -l app=keycloak -o jsonpath='{.items[0].metadata.name}')
       component_id=$(kubectl get keycloakrealmcomponent e2e-ldap-default-mappers -n "$NAMESPACE" -o jsonpath='{.status.id}')
-      kubectl exec -n keycloak "$pod" -c keycloak -- /opt/keycloak/bin/kcadm.sh \
+      kubectl exec -n "$NAMESPACE" "$pod" -c keycloak -- /opt/keycloak/bin/kcadm.sh \
         config credentials --server http://localhost:8080 --realm master --user admin --password admin
-      mappers=$(kubectl exec -n keycloak "$pod" -c keycloak -- /opt/keycloak/bin/kcadm.sh \
+      mappers=$(kubectl exec -n "$NAMESPACE" "$pod" -c keycloak -- /opt/keycloak/bin/kcadm.sh \
         get components -r test-realm \
         -q "parent=$component_id" \
         -q type=org.keycloak.storage.ldap.mappers.LDAPStorageMapper)
